@@ -161,7 +161,7 @@ Everyone else addresses AI safety with post-hoc content filters. Reflective Loop
 
 ### Innovation 5: Collaborative Reflection Awareness
 
-Sugar's Journal natively tracks when activities are shared over the network (`buddy-list` metadata). When a shared session is detected, the `PromptBuilder` automatically injects a peer-awareness dimension into the reflection:
+Sugar's Journal natively tracks when activities are shared over the network (`buddies` metadata). When a shared session is detected, the `PromptBuilder` automatically injects a peer-awareness dimension into the reflection:
 
 - **Socratic (Shared):** "What surprised you about how your partner approached the problem?"
 - **KWL (Shared):** "What did your collaborator teach you that you didn't already know?"
@@ -177,11 +177,12 @@ This leverages existing Sugar features without introducing a separate "collabora
 ┌────────────────────────────────────────────────────────────┐
 │  Sugar Desktop (Python / GTK3)                             │
 │  ┌──────────────────────────────────────────────────────┐  │
-│  │  jarabe/journal/journalactivity.py                   │  │
+│  │  src/jarabe/journal/journalactivity.py               │  │
 │  │  Hooks: model.created → trigger reflection           │  │
-│  │         model.updated → refresh if entry changed     │  │
+│  │         model.updated → filter metadata-only edits   │  │
+│  │                         before triggering.           │  │
 │  │  ┌────────────────────────────────────────────────┐  │  │
-│  │  │  jarabe/journal/detailview.py                  │  │  │
+│  │  │  src/jarabe/journal/detailview.py              │  │  │
 │  │  │  ┌──────────────────────────────────────────┐  │  │  │
 │  │  │  │  ReflectionPanel (NEW GTK widget)        │  │  │  │
 │  │  │  │  • Reflection question text              │  │  │  │
@@ -194,7 +195,7 @@ This leverages existing Sugar features without introducing a separate "collabora
 │  └────────────────────────│─────────────────────────────┘  │
 │                           │ HTTP (localhost:8765)           │
 │  ┌────────────────────────▼─────────────────────────────┐  │
-│  │  jarabe/journal/reflectionservice.py (NEW FastAPI)   │  │
+│  │  src/jarabe/journal/reflectionservice.py (NEW)       │  │
 │  │                                                      │  │
 │  │  ReflectionEngine                                    │  │
 │  │  ├─ DepthTracker    (reads/writes depth_store.json)  │  │
@@ -205,12 +206,6 @@ This leverages existing Sugar features without introducing a separate "collabora
 │  │         ├─ SugarAIBackend (school network)           │  │
 │  │         └─ OpenAIBackend  (cloud, opt-in only)       │  │
 │  └──────────────────────────────────────────────────────┘  │
-│                                                            │
-│  ┌────────────────────────────────────────────────────┐    │
-│  │  jarabe/journal/teacherdashboard.py (NEW)          │    │
-│  │  • Per-student: reflection count, last date, depth │    │
-│  │  • Class summary view (no content exposed)         │    │
-│  └────────────────────────────────────────────────────┘    │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -236,12 +231,11 @@ This leverages existing Sugar features without introducing a separate "collabora
 
 | File | Change | What It Does |
 |---|---|---|
-| `jarabe/journal/reflectionservice.py` | **NEW** | FastAPI service: engine, depth tracker, strategy selector, LLM client |
-| `jarabe/journal/reflectionpanel.py` | **NEW** | GTK widget: displays question, response box, strategy badge, depth dots |
-| `jarabe/journal/teacherdashboard.py` | **NEW** | Teacher analytics: reflection counts, depth levels per student |
-| `jarabe/journal/detailview.py` | **MODIFY** | Embed ReflectionPanel into the detail layout |
-| `jarabe/journal/journalactivity.py` | **MODIFY** | Start reflection service on launch; connect `model.created` signal |
-| `data/sugar.schemas` | **MODIFY** | Add GConf keys: `llm_backend`, `ollama_model`, `reflection_enabled` |
+| `src/jarabe/journal/reflectionservice.py` | **NEW** | FastAPI service: engine, depth tracker, strategy selector, LLM client |
+| `src/jarabe/journal/reflectionpanel.py` | **NEW** | GTK widget: displays question, response box, strategy badge, depth dots |
+| `src/jarabe/journal/detailview.py` | **MODIFY** | Embed ReflectionPanel into the detail layout |
+| `src/jarabe/journal/journalactivity.py` | **MODIFY** | Start reflection service on launch; connect `model.created` / filter `model.updated` signals |
+| `data/org.sugarlabs.gschema.xml` | **MODIFY** | Add GSettings keys: `llm-backend`, `ollama-model`, `reflection-enabled` |
 | `tests/test_reflectionservice.py` | **NEW** | Unit + integration tests for the full reflection pipeline |
 | `tests/test_reflectionpanel.py` | **NEW** | GTK widget tests using `gi.repository` test harness |
 
@@ -255,7 +249,7 @@ This leverages existing Sugar features without introducing a separate "collabora
 | **M2** (Week 6) | `ReflectionPanel` GTK widget integrated into Journal DETAIL view — working with Ollama |
 | **M3** (Week 8) | Adaptive Depth Sequencing live — questions deepen across sessions, depth stored persistently |
 | **M4** (Week 10) | Multilingual support — EN, ES, HI, FR, PT-BR system prompts, language auto-detected from Sugar locale |
-| **M5** (Week 12) | Teacher dashboard, complete documentation, final test suite, GSoC report |
+| **M5** (Week 12) | Complete documentation, final test suite, GSoC report |
 
 ### Optional (stretch goals)
 
@@ -263,7 +257,7 @@ This leverages existing Sugar features without introducing a separate "collabora
 |---|---|
 | **S1** | Voice input — child speaks reflection instead of typing (uses Sugar's existing TTS infrastructure) |
 | **S2** | Reflection history view — child sees their own past reflections in a timeline |
-| **S3** | Sugar-AI backend integration for schools already running the 2025 GSoC system |
+| **S3** | Teacher Dashboard — class summary view using existing or new roles logic (out of scope for M1-M5 as `jarabe` lacks classroom management primitives) |
 
 ---
 
@@ -273,8 +267,8 @@ This leverages existing Sugar features without introducing a separate "collabora
 
 ### Community Bonding Period (before Week 1)
 - Set up Sugar development environment (sugar-emu or VM)
-- Read and annotate `jarabe/journal/` in full: `journalactivity.py`, `detailview.py`, `model.py`, `objectchooser.py`
-- Study Diwangshu's 2025 GSoC report and Sugar-AI source code
+- Read and annotate `src/jarabe/journal/` in full: `journalactivity.py`, `detailview.py`, `model.py`, `expandedentry.py`
+- Study metadata update flows in `model.updated` and `expandedentry.py` (e.g., suppressing triggers on `update_mtime=False`)
 - Discuss design doc with mentors Walter Bender and Ibiam Chihurumnaya
 - Publish a public design document on the Sugar Labs wiki for community feedback
 
@@ -314,11 +308,12 @@ This leverages existing Sugar features without introducing a separate "collabora
 
 **Week 5**
 - Implement `ReflectionPanel` GTK widget skeleton: layout, question display, "Ask me another" button
-- Hook into `journalactivity.py`: start the FastAPI service as a subprocess on Journal launch
-- Connect `model.created` signal → HTTP POST to `/reflect`
+- Hook into `src/jarabe/journal/journalactivity.py`: start the FastAPI service as a subprocess on Journal launch
+- Connect `model.created` / filter `model.updated` signals → HTTP POST to `/reflect`
+- Ensure metadata-only edits (which call `model.write(..., update_mtime=False)`) don't overfire the reflection trigger.
 
 **Week 6 — M2**
-- Wire `ReflectionPanel` into `detailview.py` — displays below the existing entry detail
+- Wire `ReflectionPanel` into `src/jarabe/journal/detailview.py` — displays below the existing entry detail
 - Depth level dots indicator (●●○○) in the panel
 - Strategy badge (shows which framework is being used)
 - **M2 Deliverable**: Full end-to-end flow — child opens Journal entry → AI question appears
@@ -350,12 +345,11 @@ This leverages existing Sugar features without introducing a separate "collabora
 
 ---
 
-### Phase 4 — Teacher Dashboard + Polish (Weeks 11–12)
+### Phase 4 — Documentation & Wrap-up (Weeks 11–12)
 
 **Week 11**
-- Implement `TeacherDashboard`: shows per-student reflection count, last reflection date, current depth level
-- Private-by-default: dashboard shows engagement metadata only, never the child's actual reflection text
-- Optional: teacher can toggle dashboard visibility per class in Sugar control panel
+- Security and performance audits. Ensure local Ollama inference scales gracefully on XO hardware limits.
+- Complete all documentation: user guide, admin guide, deployment guide (Ollama setup via GSettings)
 
 **Week 12 — M5 + Final**
 - Complete all documentation: user guide, teacher guide, deployment guide (Ollama setup)
@@ -470,13 +464,13 @@ async def get_reflection(prompt, fallback_question: str) -> str:
 def build_prompt(request, depth_question: str) -> str:
     prompt = f'Activity: {request.activity_type}, Title: "{request.entry_title}"\n'
     prompt += f"Ask: {depth_question}"
-    if request.shared_with:  # buddy-list from Sugar Journal DS metadata
+    if request.shared_with:  # 'buddies' metadata from Sugar Journal
         peer_q = PEER_QUESTIONS[request.language][request.strategy]
         prompt += f"\nCollaborative session. Also ask: {peer_q}"
     return prompt
 ```
 
-The summer's work extends this prototype into a fully integrated Sugar Journal feature with GTK widget, persistent depth tracking, and teacher dashboard.
+The summer's work extends this prototype into a fully integrated Sugar Journal feature with GTK widget, persistent depth tracking, and GSettings integration.
 
 ---
 
