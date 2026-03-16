@@ -29,8 +29,12 @@ class ReflectionConfig(BaseModel):
         description="Ollama model name to use",
     )
     sugar_ai_url: str = Field(
-        default="http://localhost:5000",
+        default="http://localhost:8000",
         description="Sugar-AI server URL (school LAN)",
+    )
+    sugar_ai_api_key: Optional[str] = Field(
+        default=None,
+        description="Optional Sugar-AI API key for authenticated deployments",
     )
     openai_api_key: Optional[str] = Field(
         default=None,
@@ -51,6 +55,14 @@ class ReflectionConfig(BaseModel):
     service_port: int = Field(
         default=8765,
         description="Port the FastAPI service listens on",
+    )
+    request_timeout_seconds: float = Field(
+        default=30.0,
+        description="HTTP timeout for LLM backend requests",
+    )
+    strategy_overrides: dict[str, str] = Field(
+        default_factory=dict,
+        description="Optional exact bundle-id to strategy overrides for deployments",
     )
     blocked_keywords: list[str] = Field(
         default=[

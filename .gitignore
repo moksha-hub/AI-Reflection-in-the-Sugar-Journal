@@ -2,7 +2,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 depth_store.json
-!depth_store.json
 *.egg-info/
 dist/
 build/

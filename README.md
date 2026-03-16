@@ -1,329 +1,248 @@
-# 🔄 Reflective Loop
+# Reflective Loop
 
-**Adaptive AI Reflection Service for the Sugar Journal**
+Adaptive AI reflection service for the Sugar Journal.
 
-> *"The Sugar Journal stores every project a child has ever made — but it has never helped them think about what they made, why it matters, or what to try next."*
+This repository is a working prototype for the Sugar Labs GSoC 2026 idea "AI Reflection in the Sugar Journal". The goal is not to generate content for the learner, but to prompt reflective practice when a Journal entry is saved or revisited.
 
-A standalone FastAPI microservice that generates pedagogically-grounded reflection questions for children using [Sugar](https://www.sugarlabs.org/) educational software. Built as a working prototype for the [GSoC 2026 — Sugar Labs](https://wiki.sugarlabs.org/go/Summer_of_Code/2026) project: **AI Reflection in the Sugar Journal**.
+The prototype is now structured to be adaptable to Sugar itself:
+- it accepts raw Sugar Journal metadata through a dedicated endpoint
+- it keeps reflection history locally per Sugar profile and per activity
+- it supports deployment overrides for activity-to-strategy mapping
+- it uses metadata-only prompting and curated fallbacks for safety
+- it includes endpoint tests, integration tests, and failure-recovery tests
 
----
+## What the prototype demonstrates
 
-## ✨ What Makes This Different
+### 1. Adaptive depth is deterministic and local
 
-Most AI-in-education proposals do one of two things: generate content *for* the child, or check if the child's answer is correct. **Reflective Loop does neither.** It asks questions that have no single correct answer — questions that ask the child to look inward.
-
-| Feature | Generic Chatbot | Other GSoC Proposals | **Reflective Loop** |
-|---|---|---|---|
-| Strategy selection | Random | Age-based | **Activity-type-based** (Socratic for coding, KWL for writing) |
-| Question depth | Static | Hopes LLM "gets it" | **Deterministic depth progression** (4 levels, history-tracked) |
-| Safety model | Content filter | Trust the model | **Structural: no child content sent + output validation + static fallback** |
-| Collaborative awareness | None | None | **Detects shared sessions from Journal metadata** |
-| Offline support | Cloud-only | Cloud-only | **Ollama local-first by default** |
-
----
-
-## 🏗️ Architecture
-
-```
-ReflectRequest (from Sugar Journal)
-     │
-     ▼
-┌──────────────────────────────────────────────┐
-│  ReflectionEngine                            │
-│                                              │
-│  1. DepthTracker                             │
-│     └─ session_count → depth_level (1–4)     │
-│                                              │
-│  2. StrategySelector                         │
-│     └─ activity_type → framework             │
-│        TurtleBlocks → Socratic               │
-│        Write/Read   → KWL                    │
-│        Paint/Sketch → What/So What/Now What  │
-│        Unknown      → Rotating cycle         │
-│                                              │
-│  3. PromptBuilder                            │
-│     └─ strategy × depth × language → prompt  │
-│     └─ if shared_with → inject peer question │
-│                                              │
-│  4. LLMClient                                │
-│     ├─ OllamaBackend  (local, default)       │
-│     ├─ SugarAIBackend (school LAN)           │
-│     ├─ OpenAIBackend  (cloud, opt-in)        │
-│     └─ MockBackend    (testing)              │
-│                                              │
-│  5. OutputValidator                          │
-│     └─ validate → pass or silent fallback    │
-└──────────────────────────────────────────────┘
-     │
-     ▼
-ReflectResponse (question + metadata)
-```
-
----
-
-## 🚀 Quick Start
-
-```bash
-# Clone
-git clone https://github.com/moksha-hub/AI-Reflection-in-the-Sugar-Journal.git
-cd AI-Reflection-in-the-Sugar-Journal
-
-# Install dependencies
-pip install -r requirements.txt
-
-# Run the standalone demo (no LLM needed — uses mock backend)
-python reflection_service.py
-
-# Run the full test suite
-pytest test_reflection_service.py -v
-
-# Start the FastAPI server
-uvicorn reflection_service:app --port 8765
-```
-
----
-
-## 📊 Adaptive Depth Sequencing
-
-Questions deepen automatically based on the child's reflection history. This is deterministic — not "hoping the LLM generates something harder."
-
-```
-Session  1 │ ●○○○ │ L1 Descriptive │ "What did you create in this activity?"
-Session  2 │ ●○○○ │ L1 Descriptive │ "What did you create in this activity?"
-Session  3 │ ●●○○ │ L2 Analytical  │ "Why did you choose to do it that way?"
-Session  7 │ ●●●○ │ L3 Connective  │ "Where have you seen patterns like this in the real world?"
-Session 15 │ ●●●● │ L4 Creative    │ "If you could teach someone else, what would be most important?"
-```
-
-The depth is tracked per-student, per-activity in a lightweight JSON file. No cloud sync. No external database.
-
-### How It Works (Code)
+Depth progression is based on prior reflection count for the same profile and activity:
 
 ```python
 def get_depth_level(session_count: int) -> int:
-    if session_count <= 2:  return 1  # Descriptive
-    if session_count <= 6:  return 2  # Analytical
-    if session_count <= 14: return 3  # Connective
-    return 4                          # Creative
+    if session_count <= 2:
+        return 1
+    if session_count <= 6:
+        return 2
+    if session_count <= 14:
+        return 3
+    return 4
 ```
 
----
+The state is stored in a lightweight JSON file. No external database is required.
 
-## 🎯 Activity-Strategy Mapping
+### 2. Strategy mapping is seeded, not overclaimed
 
-The reflection framework is chosen by **what the child is doing**, not randomly:
-
-| Activity Type | Strategy | Pedagogical Rationale |
-|---|---|---|
-| **TurtleBlocks, MusicBlocks, Pippy** | Socratic | Procedural creation → guided questioning surfaces *why* those choices were made |
-| **Write, Read** | KWL (Know/Want/Learn) | Narrative work → knowledge-state reflection maps naturally |
-| **Paint, Sketch, Etoys** | What / So What / Now What | Aesthetic creation → experience-first reflection before analysis |
-| **Calculate, Measure** | Socratic | Quantitative → Socratic questions expose misconceptions |
-| **Unknown / custom** | Rotating (cycles all 3) | Ensures exposure to all frameworks over time |
-
-### How It Works (Code)
+The prototype does not pretend to classify every Sugar activity. It seeds a small, defensible core mapping and rotates unknown activities through all frameworks:
 
 ```python
-STRATEGY_MAP = {
-    "org.laptop.TurtleArt":    "socratic",
-    "org.laptop.Write":        "kwl",
-    "org.laptop.Paint":        "what_so_what_now_what",
-    # ... 11 Sugar activities mapped
+DEFAULT_STRATEGY_MAP = {
+    "org.laptop.TurtleArt": "socratic",
+    "org.sugarlabs.MusicBlocksActivity": "socratic",
+    "org.laptop.Write": "kwl",
+    "org.laptop.Read": "kwl",
+    "org.laptop.Paint": "what_so_what_now_what",
+    "org.laptop.Sketch": "what_so_what_now_what",
 }
-
-def select(activity_type: str, session_count: int = 0) -> str:
-    if activity_type in STRATEGY_MAP:
-        return STRATEGY_MAP[activity_type]
-    # Unknown activities: rotate through all strategies
-    return STRATEGIES[session_count % len(STRATEGIES)]
 ```
 
----
+Deployments can extend or override this mapping through configuration.
 
-## 🛡️ Structural Model Safety
+### 3. The Journal integration surface is real
 
-Safety is **architectural**, not a post-hoc filter:
+The service exposes `POST /reflect-from-journal`, which accepts raw datastore-style metadata and adapts it into the stable reflection request used by the engine.
 
-### Layer 1: No Child Content Sent
-The LLM only receives metadata (`activity_type`, `session_count`, `entry_title`). It never sees what the child wrote, drew, or coded.
+Supported metadata fields include:
+- `bundle_id`
+- `activity`
+- `title`
+- `buddies`
+- `language`
 
-### Layer 2: Constrained Output
-The system prompt forces exactly ONE question ending in `?`. No open-ended conversation. No content generation.
+The buddies parser matches Sugar's current metadata pattern, where `buddies` is typically JSON that decodes to a dictionary of buddy records.
 
-### Layer 3: Output Validation with Static Fallback
-```python
-def validate_output(text: str) -> bool:
-    text = text.strip()
-    return (
-        text.endswith("?")             # Must be a question
-        and 10 < len(text) < 300       # Single question, not a paragraph
-        and not any(kw in text.lower() for kw in BLOCKED_KEYWORDS)
-    )
+### 4. Privacy and safety are structural
 
-async def get_reflection(prompt, fallback_question: str) -> str:
-    raw = await backend.generate(prompt)
-    return raw if validate_output(raw) else fallback_question
+The model prompt contains metadata only:
+- activity bundle ID
+- local session count
+- language
+- collaborative state
+
+The Journal title remains local to the UI and is not sent to the model.
+
+Generated output must pass a strict structural validator:
+- exactly one question
+- ends with `?`
+- no newline
+- bounded length
+- no blocked keywords
+
+If generation fails or validation fails, the service silently falls back to a curated static question.
+
+### 5. The backend layer matches current deployment reality better
+
+Backends included:
+- `mock` for tests and demos
+- `ollama` for local inference
+- `sugar_ai` for LAN deployments
+- `openai` as a compatibility path only
+
+The Sugar-AI client uses a prompted chat-style request shape and tolerates response-shape variations to make integration less brittle.
+
+## Architecture
+
+```text
+Raw Journal metadata
+        |
+        v
+JournalMetadataAdapter
+        |
+        v
+ReflectRequest
+        |
+        v
+ReflectionEngine
+  |- DepthTracker
+  |- StrategySelector
+  |- PromptBuilder
+  |- LLMClient
+        |
+        v
+ReflectResponse
 ```
 
-**Model failure mode = safe static question. Never unsafe content.**
-
----
-
-## 🤝 Collaborative Reflection Awareness
-
-Sugar's Journal natively tracks shared sessions via `buddy-list` metadata. When detected, the system injects a peer-awareness question:
-
-| Strategy | Solo Question | + Collaborative Question |
-|---|---|---|
-| Socratic | *"Why did you choose that pattern?"* | + *"What surprised you about how your partner approached it?"* |
-| KWL | *"What did you learn?"* | + *"What did your collaborator teach you that you didn't already know?"* |
-| WWWW | *"What would you do differently?"* | + *"How did working together change what you ended up making?"* |
-
-No new mode. No new strategy. Just a contextual injection when the Journal signals a share.
-
----
-
-## 🌍 Multilingual Support
-
-Curated static fallback questions in **5 languages**:
-
-| Language | Code | Coverage |
-|---|---|---|
-| English | `en` | All strategies × 4 depths + peer questions |
-| Spanish | `es` | All strategies × 4 depths + peer questions |
-| Hindi | `hi` | All strategies × 4 depths + peer questions |
-| French | `fr` | All strategies × 4 depths + peer questions |
-| Portuguese | `pt` | All strategies × 4 depths + peer questions |
-
-Language is auto-detected from the Sugar locale setting.
-
----
-
-## 🔌 API Reference
+## API
 
 ### `POST /reflect`
 
-Generate a reflection question for a Journal entry.
+Use this when the caller already knows the normalized request shape.
 
-**Request:**
+Example:
+
 ```json
 {
   "activity_type": "org.laptop.TurtleArt",
-  "entry_title": "My First Spiral",
-  "student_id": "student_001",
+  "entry_title": "My Spiral",
+  "profile_id": "profile_001",
   "language": "en",
   "shared_with": []
 }
 ```
 
-**Response:**
-```json
-{
-  "question": "What did you create in this activity?",
-  "strategy": "socratic",
-  "depth_level": 1,
-  "session_count": 1,
-  "is_collaborative": false,
-  "peer_question": null
-}
-```
+### `POST /reflect-from-journal`
 
-**Collaborative Response (shared_with populated):**
+Use this when the caller is passing raw Sugar Journal metadata.
+
+Example:
+
 ```json
 {
-  "question": "Why did you choose to do it that way instead of another way?",
-  "strategy": "socratic",
-  "depth_level": 2,
-  "session_count": 5,
-  "is_collaborative": true,
-  "peer_question": "What surprised you about how your partner approached the problem?"
+  "metadata": {
+    "bundle_id": "org.laptop.Paint",
+    "title": "My Painting",
+    "buddies": "{\"1\": [\"Asha\", \"#000000,#ffffff\"]}"
+  },
+  "profile_id": "profile_001",
+  "language": "pt_BR.UTF-8"
 }
 ```
 
 ### `GET /health`
-Returns service status and active backend.
+
+Returns service status and the active backend.
 
 ### `GET /strategies`
-Lists all activity → strategy mappings.
 
-### `GET /depth/{student_id}`
-Returns depth progression for a specific student across all activities.
+Returns the effective strategy map, including deployment overrides.
 
----
+### `GET /depth/{profile_id}`
 
-## 🧪 Test Suite
+Returns local reflection counts and computed depth levels per activity.
 
-**33 tests, all passing.** Covers every component:
-
-| Component | Tests | What's Tested |
-|---|---|---|
-| `DepthTracker` | 8 | Counting, persistence, depth boundaries, student isolation, reset |
-| `StrategySelector` | 5 | All mapped activities, unknown activity rotation |
-| `PromptBuilder` | 6 | Fallback coverage, peer questions, collaborative injection, language fallback |
-| `LLMClient` | 8 | Validation rules, blocked keywords, backend failure fallback |
-| `ReflectionEngine` | 6 | Full pipeline, depth progression, collaboration, multilingual, strategy routing |
+## Quick start
 
 ```bash
-$ pytest test_reflection_service.py -q
-..................................
-33 passed in 0.57s
+git clone https://github.com/moksha-hub/AI-Reflection-in-the-Sugar-Journal.git
+cd AI-Reflection-in-the-Sugar-Journal
+pip install -r requirements.txt
+python reflection_service.py
+pytest -q
+uvicorn reflection_service:app --port 8765
 ```
 
----
+## Configuration
 
-## 🔧 LLM Backends
+Key options in `config.py`:
+- `llm_backend`
+- `ollama_url`
+- `ollama_model`
+- `sugar_ai_url`
+- `sugar_ai_api_key`
+- `openai_api_key`
+- `request_timeout_seconds`
+- `depth_store_path`
+- `default_language`
+- `strategy_overrides`
+- `blocked_keywords`
 
-| Backend | Privacy | Use Case | Config |
-|---|---|---|---|
-| **Mock** | N/A | Testing & demos | `llm_backend: mock` |
-| **Ollama** | Data never leaves device | Default deployment | `llm_backend: ollama` |
-| **Sugar-AI** | Stays on school LAN | Schools with Sugar-AI | `llm_backend: sugar_ai` |
-| **OpenAI** | Cloud (explicit opt-in) | Admin consent required | `llm_backend: openai` |
+## Test status
 
----
+The test suite currently has `51` passing tests.
 
-## 📁 File Structure
+It covers:
+- depth tracking, persistence, reset, and corrupted-store recovery
+- strategy selection and deployment overrides
+- prompt construction and metadata-only prompting
+- locale normalization and buddies parsing
+- output validation and fallback behavior
+- end-to-end reflection flow
+- FastAPI endpoints, including `/reflect-from-journal`
 
+Run:
+
+```bash
+pytest -q
 ```
+
+Expected output:
+
+```text
+51 passed
+```
+
+## Repository layout
+
+```text
 AI-Reflection-in-the-Sugar-Journal/
-├── reflection_service.py      # Main FastAPI service + all engine components
-├── config.py                  # Pydantic configuration schema
-├── prompts.py                 # Static prompt library (5 languages) + peer questions
-├── test_reflection_service.py # 33 pytest tests — all passing
-├── depth_store.json           # Persistent depth tracking (per-student × activity)
-├── requirements.txt           # Python dependencies
-├── .gitignore                 # Standard Python gitignore
-└── README.md                  # This file
+|- reflection_service.py
+|- config.py
+|- prompts.py
+|- test_reflection_service.py
+|- requirements.txt
+`- README.md
 ```
 
----
+## Why this is a stronger proposal prototype
 
-## 📚 Pedagogical References
+This prototype now proves the parts of the proposal that matter most:
+- adaptive questioning can be implemented without reading prior private answers
+- the state model fits Sugar's local profile model better than a classroom roster model
+- Journal metadata can be adapted directly into the service
+- collaborative reflection can be grounded in existing `buddies` metadata
+- the backend story is pluggable without making the proposal depend on cloud inference
 
-1. Papert, S. (1980). *Mindstorms: Children, Computers, and Powerful Ideas.* Basic Books.
-2. Hattie, J. & Timperley, H. (2007). The Power of Feedback. *Review of Educational Research*, 77(1), 81–112.
-3. Bransford, J., Brown, A., & Cocking, R. (2000). *How People Learn.* National Academy Press.
+What it does not claim:
+- exhaustive mapping for every Sugar activity
+- a teacher dashboard
+- semantic analysis of past reflection content
+- full-scale model pretraining from scratch
 
----
+## Related Sugar work
 
-## 🔗 Related
+- [Sugar Labs organization](https://github.com/sugarlabs)
+- [Music Blocks Reflection Widget PR #5446](https://github.com/sugarlabs/musicblocks/pull/5446)
+- [Sugar Journal Select All fix PR #1077](https://github.com/sugarlabs/sugar/pull/1077)
 
-- **GSoC 2026 Proposal**: [Reflective Loop: An Adaptive AI Reflection System for the Sugar Journal](https://github.com/moksha-hub/AI-Reflection-in-the-Sugar-Journal)
-- **Sugar Labs Contributions by Author**:
-  - [PR #5446 — XSS fix in Reflection Widget](https://github.com/sugarlabs/musicblocks/pull/5446) ✅ Merged by Walter Bender
-  - [PR #5919 — Dynamic backend URL in reflection.js](https://github.com/sugarlabs/musicblocks/pull/5919)
-  - [PR #6174 — Prevent projectAlgorithm overwrite](https://github.com/sugarlabs/musicblocks/pull/6174)
-  - [PR #6176 — Prevent dropped user queries](https://github.com/sugarlabs/musicblocks/pull/6176)
-  - [PR #1077 — Fix Journal Select All button](https://github.com/sugarlabs/sugar/pull/1077)
-
----
-
-## 👤 Author
-
-**Mokshagna K** — [github.com/moksha-hub](https://github.com/moksha-hub)
-
-GSoC 2026 · Sugar Labs · *Reflective Loop: An Adaptive AI Reflection System for the Sugar Journal*
-
-## 📄 License
+## License
 
 GPL-3.0

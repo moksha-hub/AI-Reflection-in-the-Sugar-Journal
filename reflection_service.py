@@ -1,59 +1,78 @@
 # -*- coding: utf-8 -*-
 """
-Reflective Loop — Adaptive AI Reflection Service for the Sugar Journal.
+Reflective Loop - Adaptive AI Reflection Service for the Sugar Journal.
 
 A standalone FastAPI service implementing:
-  - DepthTracker:      session-based depth progression per student × activity
-  - StrategySelector:  activity-type → reflection framework mapping
-  - PromptBuilder:     strategy × depth × language → system + user prompts
-  - LLMClient:         pluggable backends (Ollama, Sugar-AI, OpenAI, Mock)
-  - Output Validator:  structural safety with static fallback
-
-Author: Mokshagna K (moksha-hub)
-License: GPL-3.0
+  - DepthTracker: persistent depth progression per local Sugar profile x activity
+  - StrategySelector: bundle-id -> reflection framework mapping with overrides
+  - PromptBuilder: strategy x depth x language -> safe reflection prompts
+  - LLMClient: pluggable backends (Ollama, Sugar-AI, OpenAI, Mock)
+  - Journal adapter: converts raw Sugar Journal metadata into reflection requests
 """
 
-import json
-import os
 import asyncio
-from pathlib import Path
-from typing import Optional
+import json
+import logging
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
 import httpx
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel, Field
 
-from config import ReflectionConfig, LLMBackend
-from prompts import PROMPTS, PEER_QUESTIONS, SYSTEM_PROMPT_TEMPLATE
+from config import LLMBackend, ReflectionConfig
+from prompts import PEER_QUESTIONS, PROMPTS, SYSTEM_PROMPT_TEMPLATE
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Request / Response Models
-# ═══════════════════════════════════════════════════════════════════════════
+LOGGER = logging.getLogger(__name__)
+
 
 class ReflectRequest(BaseModel):
-    """Input from the Sugar Journal when a child finishes/revisits an entry."""
+    """Input from the Sugar Journal when a child finishes or revisits an entry."""
+
     activity_type: str = Field(
         ..., description="Sugar bundle ID, e.g. 'org.laptop.TurtleArt'"
     )
     entry_title: str = Field(
-        default="Untitled", description="Title of the Journal entry"
+        default="Untitled",
+        description="Journal title for local UI display; not sent to the model",
     )
-    student_id: str = Field(
-        default="default", description="Anonymised student identifier"
+    profile_id: str = Field(
+        default="default",
+        description="Stable local Sugar profile identifier for on-device history",
     )
-    language: str = Field(
-        default="en", description="ISO 639-1 language code"
-    )
+    language: str = Field(default="en", description="ISO 639-1 language code")
     shared_with: list[str] = Field(
         default_factory=list,
-        description="Buddy list from Journal metadata (empty = solo session)",
+        description="Buddy identifiers derived from Journal metadata",
+    )
+
+
+class JournalMetadataRequest(BaseModel):
+    """
+    Raw datastore-style metadata from Sugar Journal.
+    This matches the integration surface we would have inside jarabe.
+    """
+
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Raw Sugar Journal metadata dictionary",
+    )
+    profile_id: str = Field(
+        default="default",
+        description="Stable local Sugar profile identifier for on-device history",
+    )
+    language: Optional[str] = Field(
+        default=None,
+        description="Optional locale override; falls back to metadata or LANG",
     )
 
 
 class ReflectResponse(BaseModel):
     """Output returned to the Sugar Journal UI."""
+
     question: str
     strategy: str
     depth_level: int
@@ -62,14 +81,95 @@ class ReflectResponse(BaseModel):
     peer_question: Optional[str] = None
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# DepthTracker — persistent per-student, per-activity depth progression
-# ═══════════════════════════════════════════════════════════════════════════
+def normalize_language(language: Optional[str], default: str = "en") -> str:
+    """
+    Collapse locale strings such as en_US.UTF-8 to their ISO 639-1 prefix.
+    """
+    if not language:
+        return default
+
+    normalized = language.strip()
+    if not normalized:
+        return default
+
+    normalized = normalized.split(".", 1)[0]
+    normalized = normalized.split("@", 1)[0]
+    normalized = normalized.replace("-", "_")
+    primary = normalized.split("_", 1)[0].lower()
+    return primary or default
+
+
+def parse_buddies_metadata(raw_buddies: Any) -> list[str]:
+    """
+    Sugar stores buddies as JSON metadata that usually decodes to a dict whose
+    values are [nick, color] pairs. We keep only the buddy nick locally.
+    """
+    if not raw_buddies:
+        return []
+
+    if isinstance(raw_buddies, list):
+        parsed = raw_buddies
+    elif isinstance(raw_buddies, dict):
+        parsed = list(raw_buddies.values())
+    elif isinstance(raw_buddies, str):
+        try:
+            decoded = json.loads(raw_buddies)
+        except json.JSONDecodeError:
+            LOGGER.warning("Could not decode buddies metadata: %r", raw_buddies)
+            return []
+        parsed = list(decoded.values()) if isinstance(decoded, dict) else decoded
+    else:
+        return []
+
+    if not isinstance(parsed, list):
+        return []
+
+    buddies = []
+    for buddy in parsed:
+        if isinstance(buddy, (list, tuple)) and buddy:
+            buddies.append(str(buddy[0]))
+        elif isinstance(buddy, str):
+            buddies.append(buddy)
+    return buddies
+
+
+class JournalMetadataAdapter:
+    """
+    Converts raw Sugar Journal metadata into the service's stable request schema.
+    """
+
+    def __init__(self, default_language: str = "en"):
+        self.default_language = default_language
+
+    def to_reflect_request(self, request: JournalMetadataRequest) -> ReflectRequest:
+        metadata = request.metadata or {}
+        activity_type = (
+            metadata.get("bundle_id")
+            or metadata.get("activity")
+            or "unknown"
+        )
+        entry_title = metadata.get("title") or "Untitled"
+        language = normalize_language(
+            request.language
+            or metadata.get("language")
+            or os.environ.get("LANG"),
+            default=self.default_language,
+        )
+        shared_with = parse_buddies_metadata(metadata.get("buddies"))
+
+        return ReflectRequest(
+            activity_type=str(activity_type),
+            entry_title=str(entry_title),
+            profile_id=request.profile_id,
+            language=language,
+            shared_with=shared_with,
+        )
+
 
 class DepthTracker:
     """
-    Tracks how many times each student has reflected on each activity type.
-    Stored in a lightweight JSON file — no external database needed.
+    Tracks how many times each local Sugar profile has reflected on each activity.
+    Stored in a lightweight JSON file - no external database required.
     """
 
     def __init__(self, store_path: str = "depth_store.json"):
@@ -78,35 +178,43 @@ class DepthTracker:
         self._load()
 
     def _load(self):
-        if self._path.exists():
-            with open(self._path, "r", encoding="utf-8") as f:
-                self._data = json.load(f)
-        else:
+        if not self._path.exists():
             self._data = {}
+            return
+
+        try:
+            with open(self._path, "r", encoding="utf-8") as handle:
+                loaded = json.load(handle)
+        except (json.JSONDecodeError, OSError) as exc:
+            LOGGER.warning("Depth store unreadable at %s: %s", self._path, exc)
+            self._data = {}
+            return
+
+        self._data = loaded if isinstance(loaded, dict) else {}
 
     def _save(self):
-        with open(self._path, "w", encoding="utf-8") as f:
-            json.dump(self._data, f, indent=2)
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._path, "w", encoding="utf-8") as handle:
+            json.dump(self._data, handle, indent=2, sort_keys=True)
 
-    def get_count(self, student_id: str, activity_type: str) -> int:
-        return self._data.get(student_id, {}).get(activity_type, 0)
+    def get_count(self, profile_id: str, activity_type: str) -> int:
+        return self._data.get(profile_id, {}).get(activity_type, 0)
 
-    def increment(self, student_id: str, activity_type: str) -> int:
-        if student_id not in self._data:
-            self._data[student_id] = {}
-        current = self._data[student_id].get(activity_type, 0)
-        self._data[student_id][activity_type] = current + 1
+    def increment(self, profile_id: str, activity_type: str) -> int:
+        self._data.setdefault(profile_id, {})
+        current = self._data[profile_id].get(activity_type, 0)
+        self._data[profile_id][activity_type] = current + 1
         self._save()
         return current + 1
 
     def get_depth_level(self, session_count: int) -> int:
         """
-        Adaptive Depth Sequencing — our core innovation.
+        Adaptive depth sequencing.
 
-        Level 1 (0–2 sessions):  Descriptive  — "What happened?"
-        Level 2 (3–6 sessions):  Analytical   — "Why did you make those choices?"
-        Level 3 (7–14 sessions): Connective   — "How does this connect to the world?"
-        Level 4 (15+ sessions):  Creative     — "What's the hardest version?"
+        Level 1 (0-2 sessions): descriptive
+        Level 2 (3-6 sessions): analytical
+        Level 3 (7-14 sessions): connective
+        Level 4 (15+ sessions): creative
         """
         if session_count <= 2:
             return 1
@@ -116,68 +224,48 @@ class DepthTracker:
             return 3
         return 4
 
-    def get_student_summary(self, student_id: str) -> dict:
-        return self._data.get(student_id, {})
+    def get_profile_summary(self, profile_id: str) -> dict[str, int]:
+        return self._data.get(profile_id, {})
 
-    def reset_student(self, student_id: str, activity_type: str):
-        if student_id in self._data and activity_type in self._data[student_id]:
-            self._data[student_id][activity_type] = 0
+    def reset_profile(self, profile_id: str, activity_type: str):
+        if profile_id in self._data and activity_type in self._data[profile_id]:
+            self._data[profile_id][activity_type] = 0
             self._save()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# StrategySelector — activity-type → pedagogical framework mapping
-# ═══════════════════════════════════════════════════════════════════════════
-
 class StrategySelector:
     """
-    Maps Sugar activity types to the most pedagogically appropriate
-    reflection framework. This is NOT random — each mapping is deliberate.
+    Maps a seeded set of Sugar activity bundle IDs to reflection frameworks.
+    Unknown activities fall back cleanly rather than pretending the whole
+    ecosystem can be classified up front.
     """
 
-    STRATEGY_MAP = {
-        # Procedural activities → Socratic questioning
-        # (child made deliberate choices; questions surface WHY)
+    DEFAULT_STRATEGY_MAP = {
         "org.laptop.TurtleArt": "socratic",
         "org.sugarlabs.MusicBlocksActivity": "socratic",
-        "org.laptop.Pippy": "socratic",
-        "org.laptop.Calculate": "socratic",
-        "org.laptop.Measure": "socratic",
-
-        # Narrative activities → KWL (Know / Want / Learned)
-        # (child engaged with existing knowledge; KWL externalises change)
         "org.laptop.Write": "kwl",
         "org.laptop.Read": "kwl",
-        "org.laptop.Jukebox": "kwl",
-
-        # Aesthetic activities → What / So What / Now What
-        # (aesthetic work invites experience-first reflection)
         "org.laptop.Paint": "what_so_what_now_what",
         "org.laptop.Sketch": "what_so_what_now_what",
-        "org.laptop.Etoys": "what_so_what_now_what",
     }
 
     STRATEGIES = ["socratic", "kwl", "what_so_what_now_what"]
 
+    def __init__(self, overrides: Optional[dict[str, str]] = None):
+        self.strategy_map = dict(self.DEFAULT_STRATEGY_MAP)
+        for activity_type, strategy in (overrides or {}).items():
+            if strategy in self.STRATEGIES:
+                self.strategy_map[activity_type] = strategy
+
     def select(self, activity_type: str, session_count: int = 0) -> str:
-        """
-        Select strategy for the given activity.
-        Unknown activities rotate through all three frameworks across sessions.
-        """
-        if activity_type in self.STRATEGY_MAP:
-            return self.STRATEGY_MAP[activity_type]
-        # Unknown / custom activities: cycle through all frameworks
+        if activity_type in self.strategy_map:
+            return self.strategy_map[activity_type]
         return self.STRATEGIES[session_count % len(self.STRATEGIES)]
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# PromptBuilder — constructs LLM prompts from strategy × depth × language
-# ═══════════════════════════════════════════════════════════════════════════
-
 class PromptBuilder:
     """
-    Builds system + user prompts for the LLM.
-    Also handles collaborative session detection and peer question injection.
+    Builds system and user prompts for the LLM and exposes curated fallbacks.
     """
 
     def build_system_prompt(self, language: str = "en") -> str:
@@ -188,27 +276,26 @@ class PromptBuilder:
         request: ReflectRequest,
         strategy: str,
         depth_level: int,
+        session_count: int,
     ) -> str:
-        """Build user prompt with optional peer-awareness injection."""
-        lang = request.language if request.language in PROMPTS else "en"
-
-        # Get the static fallback question for this strategy × depth
-        depth_question = PROMPTS[lang][strategy].get(depth_level, PROMPTS[lang][strategy][1])
-
-        prompt = (
-            f'The child just finished "{request.entry_title}" '
-            f"using {request.activity_type} (session #{self._get_session_count(request)}).\n"
-            f"Generate a reflection question similar in depth to: {depth_question}"
+        language = request.language if request.language in PROMPTS else "en"
+        depth_question = PROMPTS[language][strategy].get(
+            depth_level, PROMPTS[language][strategy][1]
         )
 
-        # Collaborative injection — if buddies present, add peer question
+        prompt = (
+            f"The learner just saved or resumed work in {request.activity_type}.\n"
+            f"This local profile has reflected on this activity {session_count} time(s) before.\n"
+            f"Generate exactly one reflection question similar in depth to: {depth_question}"
+        )
+
         if request.shared_with:
-            peer_q = PEER_QUESTIONS.get(lang, PEER_QUESTIONS["en"]).get(
+            peer_question = PEER_QUESTIONS.get(language, PEER_QUESTIONS["en"]).get(
                 strategy, PEER_QUESTIONS["en"][strategy]
             )
             prompt += (
-                f"\nThis was a collaborative session with others. "
-                f"Also consider asking: {peer_q}"
+                "\nThis was a collaborative session with other learners. "
+                f"Also consider asking: {peer_question}"
             )
 
         return prompt
@@ -219,23 +306,15 @@ class PromptBuilder:
         depth_level: int,
         language: str = "en",
     ) -> str:
-        """Return a safe, pre-written static question."""
-        lang = language if language in PROMPTS else "en"
-        return PROMPTS[lang][strategy].get(depth_level, PROMPTS[lang][strategy][1])
+        normalized = language if language in PROMPTS else "en"
+        return PROMPTS[normalized][strategy].get(
+            depth_level, PROMPTS[normalized][strategy][1]
+        )
 
     def get_peer_question(self, strategy: str, language: str = "en") -> Optional[str]:
-        """Return peer-awareness question for collaborative sessions."""
-        lang = language if language in PEER_QUESTIONS else "en"
-        return PEER_QUESTIONS[lang].get(strategy)
+        normalized = language if language in PEER_QUESTIONS else "en"
+        return PEER_QUESTIONS[normalized].get(strategy)
 
-    def _get_session_count(self, request: ReflectRequest) -> int:
-        """Placeholder — actual count comes from DepthTracker in the engine."""
-        return 0
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# LLM Backends — pluggable inference providers
-# ═══════════════════════════════════════════════════════════════════════════
 
 class BaseLLMBackend:
     async def generate(self, system_prompt: str, user_prompt: str) -> str:
@@ -243,23 +322,29 @@ class BaseLLMBackend:
 
 
 class MockBackend(BaseLLMBackend):
-    """Returns the static fallback question — useful for testing."""
+    """Returns the static fallback question - useful for tests and demos."""
+
     async def generate(self, system_prompt: str, user_prompt: str) -> str:
-        # Extract the fallback question from the user prompt
         if "similar in depth to:" in user_prompt:
-            return user_prompt.split("similar in depth to:")[1].split("\n")[0].strip()
+            return user_prompt.split("similar in depth to:", 1)[1].split("\n", 1)[0].strip()
         return "What did you learn from this activity?"
 
 
 class OllamaBackend(BaseLLMBackend):
-    """Local LLM inference via Ollama — default, privacy-first."""
+    """Local LLM inference via Ollama - privacy-first default."""
 
-    def __init__(self, url: str = "http://localhost:11434", model: str = "tinyllama"):
+    def __init__(
+        self,
+        url: str = "http://localhost:11434",
+        model: str = "tinyllama",
+        timeout_seconds: float = 30.0,
+    ):
         self.url = url.rstrip("/")
         self.model = model
+        self.timeout_seconds = timeout_seconds
 
     async def generate(self, system_prompt: str, user_prompt: str) -> str:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             response = await client.post(
                 f"{self.url}/api/chat",
                 json={
@@ -276,33 +361,82 @@ class OllamaBackend(BaseLLMBackend):
 
 
 class SugarAIBackend(BaseLLMBackend):
-    """School network Sugar-AI server."""
+    """
+    Sugar-AI backend using the current prompted chat-style endpoint.
+    The response parser is intentionally tolerant because deployments may wrap
+    the result in slightly different JSON shapes.
+    """
 
-    def __init__(self, url: str = "http://localhost:5000"):
+    def __init__(
+        self,
+        url: str = "http://localhost:8000",
+        api_key: Optional[str] = None,
+        timeout_seconds: float = 30.0,
+    ):
         self.url = url.rstrip("/")
+        self.api_key = api_key
+        self.timeout_seconds = timeout_seconds
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
+        return headers
+
+    @staticmethod
+    def _extract_text(payload: dict[str, Any]) -> str:
+        for key in ("response", "answer", "question", "content", "message"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+        choices = payload.get("choices")
+        if isinstance(choices, list) and choices:
+            choice = choices[0]
+            if isinstance(choice, dict):
+                message = choice.get("message")
+                if isinstance(message, dict):
+                    content = message.get("content")
+                    if isinstance(content, str) and content.strip():
+                        return content.strip()
+
+        raise ValueError(f"Unsupported Sugar-AI response shape: {payload!r}")
 
     async def generate(self, system_prompt: str, user_prompt: str) -> str:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        payload = {
+            "chat": True,
+            "prompt": user_prompt,
+            "system_prompt": system_prompt,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             response = await client.post(
-                f"{self.url}/api/reflect",
-                json={
-                    "system_prompt": system_prompt,
-                    "user_prompt": user_prompt,
-                },
+                f"{self.url}/ask-llm-prompted",
+                json=payload,
+                headers=self._headers(),
             )
             response.raise_for_status()
-            return response.json().get("question", "")
+            return self._extract_text(response.json())
 
 
 class OpenAIBackend(BaseLLMBackend):
-    """Cloud LLM — explicit opt-in only."""
+    """Cloud LLM - compatibility path only, not the core deployment target."""
 
-    def __init__(self, api_key: str, model: str = "gpt-3.5-turbo"):
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "gpt-3.5-turbo",
+        timeout_seconds: float = 30.0,
+    ):
         self.api_key = api_key
         self.model = model
+        self.timeout_seconds = timeout_seconds
 
     async def generate(self, system_prompt: str, user_prompt: str) -> str:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             response = await client.post(
                 "https://api.openai.com/v1/chat/completions",
                 headers={"Authorization": f"Bearer {self.api_key}"},
@@ -320,14 +454,10 @@ class OpenAIBackend(BaseLLMBackend):
             return response.json()["choices"][0]["message"]["content"]
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# LLMClient — output validation + fallback logic
-# ═══════════════════════════════════════════════════════════════════════════
-
 class LLMClient:
     """
-    Wraps a backend with output validation.
-    If the LLM output is malformed or unsafe, silently return a static question.
+    Wraps a backend with structural output validation.
+    If the model output is malformed or unsafe, a curated static question is used.
     """
 
     def __init__(self, backend: BaseLLMBackend, blocked_keywords: list[str]):
@@ -335,15 +465,18 @@ class LLMClient:
         self.blocked_keywords = blocked_keywords
 
     def validate_output(self, text: str) -> bool:
-        """Structural safety check — not a content filter, a format guard."""
         text = text.strip()
         if not text:
             return False
         if not text.endswith("?"):
             return False
+        if text.count("?") != 1:
+            return False
+        if "\n" in text:
+            return False
         if len(text) < 10 or len(text) > 300:
             return False
-        if any(kw in text.lower() for kw in self.blocked_keywords):
+        if any(keyword in text.lower() for keyword in self.blocked_keywords):
             return False
         return True
 
@@ -353,32 +486,26 @@ class LLMClient:
         user_prompt: str,
         fallback_question: str,
     ) -> str:
-        """Generate a reflection question with safety fallback."""
         try:
             raw = await self.backend.generate(system_prompt, user_prompt)
             if self.validate_output(raw):
                 return raw.strip()
-        except Exception:
-            pass
-        # Silent fallback — child sees a safe, curated question
+        except Exception as exc:
+            LOGGER.warning("LLM generation failed; using fallback question: %s", exc)
         return fallback_question
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# ReflectionEngine — orchestrates all components
-# ═══════════════════════════════════════════════════════════════════════════
-
 class ReflectionEngine:
     """
-    The main engine that ties together:
-      DepthTracker → StrategySelector → PromptBuilder → LLMClient
+    Orchestrates depth tracking, strategy selection, prompt construction, and generation.
     """
 
     def __init__(self, config: ReflectionConfig):
         self.config = config
         self.depth_tracker = DepthTracker(config.depth_store_path)
-        self.strategy_selector = StrategySelector()
+        self.strategy_selector = StrategySelector(config.strategy_overrides)
         self.prompt_builder = PromptBuilder()
+        self.metadata_adapter = JournalMetadataAdapter(config.default_language)
         self.llm_client = LLMClient(
             backend=self._create_backend(config),
             blocked_keywords=config.blocked_keywords,
@@ -386,55 +513,59 @@ class ReflectionEngine:
 
     def _create_backend(self, config: ReflectionConfig) -> BaseLLMBackend:
         if config.llm_backend == LLMBackend.OLLAMA:
-            return OllamaBackend(config.ollama_url, config.ollama_model)
-        elif config.llm_backend == LLMBackend.SUGAR_AI:
-            return SugarAIBackend(config.sugar_ai_url)
-        elif config.llm_backend == LLMBackend.OPENAI:
+            return OllamaBackend(
+                config.ollama_url,
+                config.ollama_model,
+                config.request_timeout_seconds,
+            )
+        if config.llm_backend == LLMBackend.SUGAR_AI:
+            return SugarAIBackend(
+                config.sugar_ai_url,
+                config.sugar_ai_api_key,
+                config.request_timeout_seconds,
+            )
+        if config.llm_backend == LLMBackend.OPENAI:
             if not config.openai_api_key:
                 raise ValueError("OpenAI backend requires an API key")
-            return OpenAIBackend(config.openai_api_key, config.openai_model)
-        else:
-            return MockBackend()
+            return OpenAIBackend(
+                config.openai_api_key,
+                config.openai_model,
+                config.request_timeout_seconds,
+            )
+        return MockBackend()
 
     async def reflect(self, request: ReflectRequest) -> ReflectResponse:
-        """Full reflection pipeline: context → strategy → depth → prompt → question."""
-
-        # 1. Get session count and compute depth
         session_count = self.depth_tracker.get_count(
-            request.student_id, request.activity_type
+            request.profile_id, request.activity_type
         )
         depth_level = self.depth_tracker.get_depth_level(session_count)
+        strategy = self.strategy_selector.select(request.activity_type, session_count)
 
-        # 2. Select pedagogical strategy based on activity type
-        strategy = self.strategy_selector.select(
-            request.activity_type, session_count
-        )
-
-        # 3. Build prompts
         system_prompt = self.prompt_builder.build_system_prompt(request.language)
         user_prompt = self.prompt_builder.build_user_prompt(
-            request, strategy, depth_level
+            request,
+            strategy,
+            depth_level,
+            session_count,
         )
-        fallback = self.prompt_builder.get_fallback_question(
-            strategy, depth_level, request.language
+        fallback_question = self.prompt_builder.get_fallback_question(
+            strategy,
+            depth_level,
+            request.language,
         )
-
-        # 4. Generate question (with safety fallback)
         question = await self.llm_client.get_reflection(
-            system_prompt, user_prompt, fallback
+            system_prompt,
+            user_prompt,
+            fallback_question,
         )
 
-        # 5. Increment session count for next time
-        new_count = self.depth_tracker.increment(
-            request.student_id, request.activity_type
-        )
-
-        # 6. Handle collaborative session
-        is_collaborative = len(request.shared_with) > 0
+        new_count = self.depth_tracker.increment(request.profile_id, request.activity_type)
+        is_collaborative = bool(request.shared_with)
         peer_question = None
         if is_collaborative:
             peer_question = self.prompt_builder.get_peer_question(
-                strategy, request.language
+                strategy,
+                request.language,
             )
 
         return ReflectResponse(
@@ -446,108 +577,112 @@ class ReflectionEngine:
             peer_question=peer_question,
         )
 
-
-# ═══════════════════════════════════════════════════════════════════════════
-# FastAPI Application
-# ═══════════════════════════════════════════════════════════════════════════
-
-config = ReflectionConfig()
-engine: Optional[ReflectionEngine] = None
+    async def reflect_from_metadata(
+        self, metadata_request: JournalMetadataRequest
+    ) -> ReflectResponse:
+        request = self.metadata_adapter.to_reflect_request(metadata_request)
+        return await self.reflect(request)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global engine
-    engine = ReflectionEngine(config)
-    yield
-    engine = None
+def create_app(config_override: Optional[ReflectionConfig] = None) -> FastAPI:
+    config = config_override or ReflectionConfig()
 
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        app.state.config = config
+        app.state.engine = ReflectionEngine(config)
+        yield
+        app.state.engine = None
 
-app = FastAPI(
-    title="Reflective Loop",
-    description="Adaptive AI Reflection Service for the Sugar Journal",
-    version="0.1.0",
-    lifespan=lifespan,
-)
+    app = FastAPI(
+        title="Reflective Loop",
+        description="Adaptive AI Reflection Service for the Sugar Journal",
+        version="0.2.0",
+        lifespan=lifespan,
+    )
 
+    @app.get("/health")
+    async def health():
+        return {"status": "ok", "backend": config.llm_backend.value}
 
-@app.get("/health")
-async def health():
-    return {"status": "ok", "backend": config.llm_backend.value}
+    @app.post("/reflect", response_model=ReflectResponse)
+    async def reflect(payload: ReflectRequest, request: Request):
+        engine = getattr(request.app.state, "engine", None)
+        if engine is None:
+            raise HTTPException(status_code=503, detail="Engine not initialised")
+        return await engine.reflect(payload)
 
+    @app.post("/reflect-from-journal", response_model=ReflectResponse)
+    async def reflect_from_journal(payload: JournalMetadataRequest, request: Request):
+        engine = getattr(request.app.state, "engine", None)
+        if engine is None:
+            raise HTTPException(status_code=503, detail="Engine not initialised")
+        return await engine.reflect_from_metadata(payload)
 
-@app.post("/reflect", response_model=ReflectResponse)
-async def reflect(request: ReflectRequest):
-    if engine is None:
-        raise HTTPException(status_code=503, detail="Engine not initialised")
-    return await engine.reflect(request)
-
-
-@app.get("/strategies")
-async def strategies():
-    """List all known activity → strategy mappings."""
-    return {
-        "mappings": StrategySelector.STRATEGY_MAP,
-        "available_strategies": StrategySelector.STRATEGIES,
-    }
-
-
-@app.get("/depth/{student_id}")
-async def get_depth(student_id: str):
-    """Get reflection depth summary for a student."""
-    if engine is None:
-        raise HTTPException(status_code=503, detail="Engine not initialised")
-    summary = engine.depth_tracker.get_student_summary(student_id)
-    result = {}
-    for activity, count in summary.items():
-        result[activity] = {
-            "session_count": count,
-            "depth_level": engine.depth_tracker.get_depth_level(count),
+    @app.get("/strategies")
+    async def strategies(request: Request):
+        engine = getattr(request.app.state, "engine", None)
+        if engine is None:
+            raise HTTPException(status_code=503, detail="Engine not initialised")
+        return {
+            "mappings": engine.strategy_selector.strategy_map,
+            "available_strategies": StrategySelector.STRATEGIES,
         }
-    return {"student_id": student_id, "activities": result}
+
+    @app.get("/depth/{profile_id}")
+    async def get_depth(profile_id: str, request: Request):
+        engine = getattr(request.app.state, "engine", None)
+        if engine is None:
+            raise HTTPException(status_code=503, detail="Engine not initialised")
+
+        summary = engine.depth_tracker.get_profile_summary(profile_id)
+        activities = {}
+        for activity, count in summary.items():
+            activities[activity] = {
+                "session_count": count,
+                "depth_level": engine.depth_tracker.get_depth_level(count),
+            }
+        return {"profile_id": profile_id, "activities": activities}
+
+    return app
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Standalone demo runner
-# ═══════════════════════════════════════════════════════════════════════════
+app = create_app()
+
 
 async def demo():
-    """Run a quick demo showing all three strategies and depth progression."""
+    """Run a local demo showing strategies, collaboration, and depth progression."""
     print("=" * 60)
-    print("Sugar Journal AI Reflection — Prototype Demo")
+    print("Sugar Journal AI Reflection - Prototype Demo")
     print("=" * 60)
 
-    demo_config = ReflectionConfig(llm_backend=LLMBackend.MOCK)
-    demo_engine = ReflectionEngine(demo_config)
-
+    demo_engine = ReflectionEngine(ReflectionConfig(llm_backend=LLMBackend.MOCK))
     test_entries = [
         ReflectRequest(
             activity_type="org.laptop.TurtleArt",
             entry_title="My First Spiral",
-            student_id="student_001",
+            profile_id="profile_001",
         ),
         ReflectRequest(
             activity_type="org.laptop.Write",
             entry_title="My Story About Space",
-            student_id="student_001",
+            profile_id="profile_001",
         ),
         ReflectRequest(
             activity_type="org.laptop.Paint",
             entry_title="Sunset Drawing",
-            student_id="student_001",
+            profile_id="profile_001",
         ),
-        # Collaborative session
         ReflectRequest(
             activity_type="org.laptop.TurtleArt",
             entry_title="Team Fractal Project",
-            student_id="student_001",
-            shared_with=["student_002"],
+            profile_id="profile_001",
+            shared_with=["profile_002"],
         ),
-        # Spanish session
         ReflectRequest(
             activity_type="org.laptop.Paint",
             entry_title="Mi Dibujo del Sol",
-            student_id="student_002",
+            profile_id="profile_002",
             language="es",
         ),
     ]
@@ -560,18 +695,18 @@ async def demo():
         print(f"  Session #:     {result.session_count}")
         print(f"  Question:      {result.question}")
         if result.is_collaborative:
-            print(f"  Collaborative: Yes")
+            print("  Collaborative: Yes")
             print(f"  Peer Question: {result.peer_question}")
 
-    # Show depth progression
     print("\n" + "=" * 60)
     print("Depth Progression Demo (15 TurtleBlocks sessions)")
     print("=" * 60)
 
+    demo_store = "depth_progression_demo.json"
     progression_engine = ReflectionEngine(
         ReflectionConfig(
             llm_backend=LLMBackend.MOCK,
-            depth_store_path="depth_progression_demo.json",
+            depth_store_path=demo_store,
         )
     )
 
@@ -580,19 +715,17 @@ async def demo():
             ReflectRequest(
                 activity_type="org.laptop.TurtleArt",
                 entry_title=f"TurtleBlocks Session {i + 1}",
-                student_id="depth_demo_student",
+                profile_id="depth_demo_profile",
             )
         )
-        level_bar = "●" * result.depth_level + "○" * (4 - result.depth_level)
+        level_bar = "*" * result.depth_level + "." * (4 - result.depth_level)
         print(f"  Session {i + 1:2d} | {level_bar} | L{result.depth_level} | {result.question}")
 
-    # Clean up demo files
-    for f in ["depth_progression_demo.json"]:
-        if os.path.exists(f):
-            os.remove(f)
+    if os.path.exists(demo_store):
+        os.remove(demo_store)
 
     print("\n" + "=" * 60)
-    print("DONE — All reflection strategies + depth progression tested.")
+    print("DONE - All reflection strategies + depth progression tested.")
     print("=" * 60)
 
 
