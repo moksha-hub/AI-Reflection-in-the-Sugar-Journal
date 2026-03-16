@@ -11,6 +11,8 @@
 | GitHub Username | [moksha-hub](https://github.com/moksha-hub) |
 | First Language | Telugu |
 | Location and Timezone | India, IST (UTC+5:30) |
+| Project Size | 350 hours |
+| Difficulty | Hard |
 | Availability | 30-35 hours/week during the coding period |
 
 ### Previous Open Source Work
@@ -415,7 +417,7 @@ Before the second evaluation, I plan to complete:
 
 ## Hours Per Week
 
-I can dedicate **30-35 hours per week** to this project during the coding period. This will be my primary technical commitment during the summer.
+I can dedicate **about 30 hours per week on average**, with some weeks reaching **35 hours** around integration or milestone work. This keeps the plan aligned with a 350-hour project while still leaving realistic room for debugging and buffer time.
 
 ---
 
