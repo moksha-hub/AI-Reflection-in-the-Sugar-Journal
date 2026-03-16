@@ -314,9 +314,11 @@ That does not mean the full Sugar Journal integration is already done, but it do
 - improve raw Journal metadata adaptation
 - verify collaboration-aware handling
 - document service contract for Sugar-side use
+- build a minimal Sugar-side integration spike that can display a mock reflection question in the Journal detail flow
 
 ### Week 4
 
+- connect the Sugar-side spike to the service using the stable API contract
 - test repeated-session depth progression thoroughly
 - test strategy overrides and malformed metadata cases
 - tune prompts against open-source instruct models
@@ -324,7 +326,7 @@ That does not mean the full Sugar Journal integration is already done, but it do
 
 ### Week 5
 
-- begin Sugar Journal integration in the detail flow
+- continue Journal detail view integration
 - connect Journal events to service calls
 - ensure metadata-only updates do not retrigger incorrectly
 - prepare first visible Journal integration demo
@@ -337,14 +339,14 @@ Before the first evaluation, I plan to complete:
 - the seeded activity strategy model,
 - adaptive depth persistence,
 - collaboration-aware prompting,
-- first visible Journal-side integration work.
+- a visible Journal-side integration path using either a mock or live local service call.
 
 ### Week 6
 
-- continue Journal detail view integration
-- add reflection panel UI
+- complete reflection panel UI
 - improve loading and refresh behavior in the Journal
 - fix integration issues found during mentor review
+- stabilize the end-to-end flow from Journal event to rendered question
 
 ### Week 7
 
@@ -376,7 +378,7 @@ Before the first evaluation, I plan to complete:
 
 Before the second evaluation, I plan to complete:
 
-- a working Journal reflection loop,
+- a working Journal reflection loop triggered from the save or revisit flow,
 - adaptive depth persistence,
 - collaboration-aware reflection,
 - safe bounded prompting and fallback behavior,
@@ -408,9 +410,9 @@ Before the second evaluation, I plan to complete:
 |---|---|---|
 | Community Bonding | reflection-framework notes, Journal integration notes, refined design | shared design summary |
 | M1 | robust FastAPI reflection service with tested schema, depth tracking, strategy selection, and validation | passing unit and integration tests |
-| M2 | raw Journal metadata adaptation and collaboration-aware reflection path | service demo and endpoint tests |
+| M2 | raw Journal metadata adaptation plus a minimal Journal-side integration spike | service demo, endpoint tests, and Sugar-side walkthrough |
 | M3 | Journal detail-view integration with visible reflection question flow | running Sugar demo or mentor walkthrough |
-| M4 | adaptive depth persistence and refined safety behavior in integrated flow | repeated-session and shared-session demo |
+| M4 | adaptive depth persistence, collaboration-aware prompting, and locale-aware fallback behavior in the integrated flow | repeated-session and shared-session demo |
 | M5 | final documentation, cleanup, and final report | final docs and final submission |
 
 ### Stretch goals
