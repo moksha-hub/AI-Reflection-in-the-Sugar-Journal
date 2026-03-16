@@ -119,9 +119,7 @@ The proposal is grounded in current Sugar code:
 
 ### 1. Adapting Across the Variety of Sugar Activities
 
-Walter Bender asked how the system should adapt to the variety of Sugar activities. My answer is: the v1 design should be seeded, not exhaustive.
-
-Different activities invite different kinds of reflection, but it would be unrealistic to claim a complete taxonomy for the entire Sugar ecosystem in one summer. So the system starts with a small, defensible mapping for core activity families:
+Different activities invite different kinds of reflection, but it would be unrealistic to claim a complete taxonomy for the entire Sugar ecosystem in one summer. The v1 design is therefore seeded, not exhaustive. It starts with a small, defensible mapping for core activity families:
 
 - Socratic for procedural creation such as TurtleBlocks and Music Blocks
 - KWL for reading and writing activities such as Write and Read
@@ -145,9 +143,7 @@ The progression is stored locally in a lightweight JSON structure keyed by profi
 
 ### 3. Model Safety by Structure
 
-Walter also asked how model safety will be handled. My answer is that safety should be structural, not bolted on afterward.
-
-The v1 safety model is:
+Model safety is handled structurally rather than being bolted on afterward. The v1 safety model is:
 
 - metadata-only prompting rather than sending the child's work or previous private answers,
 - a system prompt that asks for exactly one reflection question,
@@ -158,9 +154,7 @@ This means a model failure produces a safe static reflection question rather tha
 
 ### 4. Collaborative Reflection Awareness
 
-Walter also pointed out that if there is evidence of a share, it should be considered in the reflection. I agree, and this is one of the strongest parts of the design.
-
-When Journal metadata shows collaborators via `buddies`, the reflection question can become collaboration-aware. For example, instead of only asking what the learner did, the system can also ask what changed because the work was shared.
+Collaborative work should change the reflection, not be ignored. When Journal metadata shows collaborators via `buddies`, the reflection question can become collaboration-aware. For example, instead of only asking what the learner did, the system can also ask what changed because the work was shared.
 
 This is feasible because the metadata already exists in Sugar today, and the prototype already parses this metadata shape directly.
 
@@ -273,6 +267,20 @@ At the time of this proposal revision, the prototype test suite passes:
 - **51 tests passing**
 
 That does not mean the full Sugar Journal integration is already done, but it does mean the core reflection engine is no longer hypothetical.
+
+### Current Implementation Status
+
+| Area | Current status |
+|---|---|
+| reflection engine | implemented and tested |
+| adaptive depth tracking | implemented and tested |
+| seeded strategy selection | implemented and tested |
+| metadata-only prompt construction | implemented and tested |
+| collaborative reflection from `buddies` metadata | implemented and tested |
+| FastAPI endpoints | implemented and tested |
+| direct Sugar Journal metadata adapter | implemented and tested |
+| Sugar Journal UI integration in `jarabe` | grounded in current source, planned for project implementation |
+| Journal trigger wiring in `jarabe` | grounded in current source, planned for project implementation |
 
 ---
 
