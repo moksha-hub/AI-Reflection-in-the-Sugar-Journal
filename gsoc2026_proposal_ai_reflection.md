@@ -184,6 +184,8 @@ The first version focuses on feasible, clearly scoped deployment paths:
 | Sugar-AI | school or lab server | for deployments that already use Sugar-AI |
 | Mock backend | local test path | for development, testing, and safe fallback during early integration |
 
+Model selection will be evidence-driven. The prototype already supports a very small local model for smoke testing, but the main local evaluation during the project will compare small instruction-tuned Ollama models and select the smallest one that reliably follows the one-question prompt, behaves well across the target languages, and stays within acceptable latency and fallback rates. If a device cannot support that path reliably, Sugar-AI remains the supported non-cloud alternative.
+
 The prototype also keeps a compatibility-oriented cloud backend, but that is not a core deliverable for the project.
 
 ---
@@ -299,7 +301,7 @@ This does not mean the full Sugar Journal integration is already done. It means 
 
 - read the full Journal integration path in `journalactivity.py`, `detailview.py`, `expandedentry.py`, and related datastore code
 - review Diwangshu's Music Blocks reflection work
-- research reflective-practice frameworks and finalise the v1 strategy seed
+- finalise the v1 strategy seed using prior framework research and bundle/category analysis
 - define evaluation criteria for question quality and model compliance
 - refine integration scope with mentors
 
@@ -330,6 +332,7 @@ This does not mean the full Sugar Journal integration is already done. It means 
 - connect the Sugar-side spike to the service using the stable API contract
 - test repeated-session depth progression thoroughly
 - test malformed metadata and strategy override cases
+- compare candidate local models on latency, prompt compliance, multilingual behaviour, and fallback rate
 - tune prompts against open-source instruct models
 - keep buffer for reliability fixes
 
