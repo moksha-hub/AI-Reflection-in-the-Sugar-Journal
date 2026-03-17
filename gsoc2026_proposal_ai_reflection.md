@@ -14,6 +14,10 @@
 | Discord | `moksha__k` |
 | First Language | Telugu |
 | Location / Timezone | India, IST (UTC+5:30) |
+| Organisation | Sugar Labs |
+| Project Idea | AI Reflection in the Sugar Journal |
+| Coding Mentors | Walter Bender, Ibiam Chihurumnaya |
+| Assisting Mentors | Diwangshu Kakoty, Aman Naik |
 | Project Size | 350 hours |
 | Difficulty | Hard |
 | Availability | 30-35 hours/week during the coding period |
@@ -124,7 +128,7 @@ The project idea explicitly asks for research into reflective practice, so I com
 
 The proposal is grounded in current Sugar source:
 
-- `src/jarabe/journal/journalactivity.py` connects to `model.created` and `model.updated`,
+- `src/jarabe/journal/journalactivity.py` connects to `model.created` and `model.updated`; `model.created` is the primary clean trigger, while `model.updated` requires filtering because metadata edits can also fire it,
 - `src/jarabe/journal/detailview.py` manages the detail view where a reflection panel fits,
 - `src/jarabe/journal/expandedentry.py` displays metadata and `buddies` collaborators,
 - `src/jarabe/journal/model.py` exposes `activity` and `buddies` metadata through the datastore query interface,
@@ -299,27 +303,27 @@ This does not mean the full Sugar Journal integration is already done. It means 
 
 ### Community Bonding
 
-- read the full Journal integration path in `journalactivity.py`, `detailview.py`, `expandedentry.py`, and related datastore code
+- read the full Journal integration path in `src/jarabe/journal/journalactivity.py`, `src/jarabe/journal/detailview.py`, `src/jarabe/journal/expandedentry.py`, and related datastore code
 - review Diwangshu's Music Blocks reflection work
 - finalise the v1 strategy seed using prior framework research and bundle/category analysis
 - define evaluation criteria for question quality and model compliance
 - refine integration scope with mentors
 
-### Week 1
+### Week 1 - schema and strategy foundation
 
 - finalise request and response schema
 - finalise seeded activity-to-strategy mapping
 - finalise local depth model and profile key structure
 - assemble reflection examples for quality evaluation
 
-### Week 2
+### Week 2 - prompt and validation hardening
 
 - expand and validate fallback prompt sets
 - refine prompt builder and output validator
 - improve backend abstraction
 - add more unit tests for core behaviour
 
-### Week 3
+### Week 3 - service API and Journal adapter
 
 - harden FastAPI service endpoints
 - improve the raw Journal metadata adaptation layer
@@ -327,7 +331,7 @@ This does not mean the full Sugar Journal integration is already done. It means 
 - document the service contract for Sugar-side callers
 - build a minimal Sugar-side integration spike that can render a mock reflection question in the Journal detail flow
 
-### Week 4 (buffer)
+### Week 4 - integration spike and model evaluation
 
 - connect the Sugar-side spike to the service using the stable API contract
 - test repeated-session depth progression thoroughly
@@ -336,7 +340,7 @@ This does not mean the full Sugar Journal integration is already done. It means 
 - tune prompts against open-source instruct models
 - keep buffer for reliability fixes
 
-### Week 5
+### Week 5 - first Journal-side flow
 
 - continue Sugar Journal integration in the detail flow
 - connect Journal events to service calls
@@ -355,34 +359,34 @@ This does not mean the full Sugar Journal integration is already done. It means 
 
 ---
 
-### Week 6
+### Week 6 - panel UI and end-to-end stabilisation
 
 - complete the reflection panel GTK UI
 - improve loading and refresh behaviour in the Journal
 - fix integration issues from mentor review
 - stabilise the end-to-end flow from Journal event to rendered question
 
-### Week 7 (buffer)
+### Week 7 - integration hardening
 
 - expand integration tests
 - improve safety and failure handling in Journal-side flow
 - verify compatibility with live Sugar metadata
 - keep buffer for UI and signal-timing issues
 
-### Week 8
+### Week 8 - repeated-flow and locale validation
 
 - validate repeated save and revisit flows
 - polish collaboration-aware reflection behaviour
 - verify locale handling and multilingual fallbacks
 - continue open-source model evaluation
 
-### Week 9
+### Week 9 - model evaluation and deployment analysis
 
 - improve prompt quality or do lightweight task adaptation if needed
 - measure reliability and latency under realistic conditions
 - document deployment options and tradeoffs
 
-### Week 10 (buffer)
+### Week 10 - v1 polish and regression buffer
 
 - finalise v1 integration behaviour
 - clean up edge cases in service and Journal interaction
@@ -400,13 +404,13 @@ This does not mean the full Sugar Journal integration is already done. It means 
 
 ---
 
-### Week 11
+### Week 11 - documentation and setup polish
 
 - complete documentation: developer guide and deployment notes
 - improve configuration and setup instructions
 - polish panel UI and API behaviour
 
-### Week 12
+### Week 12 - final cleanup and submission
 
 - final cleanup and testing pass
 - mentor feedback fixes
