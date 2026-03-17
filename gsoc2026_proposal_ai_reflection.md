@@ -11,8 +11,6 @@
 | GitHub Username | [moksha-hub](https://github.com/moksha-hub) |
 | First Language | Telugu |
 | Location and Timezone | India, IST (UTC+5:30) |
-| Project Size | 350 hours |
-| Difficulty | Hard |
 | Availability | 30-35 hours/week during the coding period |
 
 ### Previous Open Source Work
@@ -47,7 +45,7 @@ The system is intentionally not a generic chatbot. It asks one short, age-approp
 - the activity type,
 - the current locale,
 - whether the work was collaborative,
-- how often this Sugar profile has reflected on similar work before.
+- how many times this Sugar profile has reflected on similar work before — tracked as a simple local count, not by reading any previous private responses.
 
 The project directly matches the official Sugar Labs idea:
 
@@ -78,6 +76,8 @@ This project is realistic because it builds on:
 - existing reflection-related work in Music Blocks,
 - existing Sugar-AI and FastAPI-based infrastructure,
 - an already working prototype with passing tests.
+
+Note: a teacher-facing dashboard is not in scope for this project. No role or classroom model exists in `src/jarabe` that this proposal could build on. Reflection engagement data is stored per Sugar profile on the local machine.
 
 ---
 
@@ -119,31 +119,39 @@ The proposal is grounded in current Sugar code:
 
 ### 1. Adapting Across the Variety of Sugar Activities
 
-Different activities invite different kinds of reflection, but it would be unrealistic to claim a complete taxonomy for the entire Sugar ecosystem in one summer. The v1 design is therefore seeded, not exhaustive. It starts with a small, defensible mapping for core activity families:
+Walter Bender asked how the system should adapt to the variety of Sugar activities. My answer is: the v1 design should be seeded, not exhaustive.
+
+Different activities invite different kinds of reflection, but mapping the entire Sugar activity ecosystem in one summer would be premature. The ASLO repository (https://github.com/sugarlabs/aslo) groups activities into categories and is a useful reference for building a principled v1 seed. Rather than inferring from just the activity name, I will use the bundle category to inform the initial strategy assignment.
+
+The v1 seed covers core activity families:
 
 - Socratic for procedural creation such as TurtleBlocks and Music Blocks
 - KWL for reading and writing activities such as Write and Read
 - What / So What / Now What for expressive activities such as Paint and Sketch
-- generic fallback for unknown activities
+- generic fallback for anything else — the system rotates through available frameworks
 
-For unknown or custom activities, the system rotates through the available frameworks rather than pretending it can perfectly classify them. The prototype already supports deployment-specific overrides, so the mapping can be extended safely over time.
+Activities that resist categorisation (such as a plain calculator) fall through to the generic fallback rather than being force-fitted to a reflection strategy that does not match their nature. The prototype already supports deployment-specific overrides, so the mapping can be extended or corrected over time without engine changes.
 
 ### 2. Adaptive Depth Sequencing
 
-The reflection question should become deeper over time, but that adaptation should remain understandable and safe. In v1, adaptation is based on local per-profile history, not semantic analysis of previous private responses.
+The reflection question should become deeper over time, but that adaptation should remain understandable and safe.
 
-| Depth Level | Basis | Reflection Style |
+In v1, adaptation is based on a **local count of how many times this Sugar profile has reflected on this type of activity** — not on reading or analysing the content of any previous responses. A child who has reflected three times on a TurtleBlocks project will receive a slightly deeper question than someone reflecting for the first time. No previous private responses are examined.
+
+| Depth Level | When it activates | Reflection Style |
 |---|---|---|
-| Level 1 | first reflections | descriptive: what happened |
-| Level 2 | repeated reflections | analytical: why those choices |
-| Level 3 | continued reflections | connective: links to other ideas or experiences |
-| Level 4 | sustained reflection history | transfer-oriented: what next, what harder version, what to explain to others |
+| Level 1 | early reflections | descriptive: what happened |
+| Level 2 | after repeated reflections | analytical: why those choices |
+| Level 3 | after continued reflections | connective: links to other ideas or the real world |
+| Level 4 | after sustained reflection history | transfer-oriented: what would you do next, what would you explain to someone else |
 
-The progression is stored locally in a lightweight JSON structure keyed by profile and activity.
+This count is stored locally in a lightweight JSON file keyed by Sugar profile and activity type. It lives on the device, requires no database, and contains no private content.
 
 ### 3. Model Safety by Structure
 
-Model safety is handled structurally rather than being bolted on afterward. The v1 safety model is:
+Walter also asked how model safety will be handled. My answer is that safety should be structural, not bolted on afterward.
+
+The v1 safety model is:
 
 - metadata-only prompting rather than sending the child's work or previous private answers,
 - a system prompt that asks for exactly one reflection question,
@@ -154,9 +162,13 @@ This means a model failure produces a safe static reflection question rather tha
 
 ### 4. Collaborative Reflection Awareness
 
-Collaborative work should change the reflection, not be ignored. When Journal metadata shows collaborators via `buddies`, the reflection question can become collaboration-aware. For example, instead of only asking what the learner did, the system can also ask what changed because the work was shared.
+Walter also pointed out that if there is evidence of a share, it should be considered in the reflection. I agree, and this is one of the strongest parts of the design.
 
-This is feasible because the metadata already exists in Sugar today, and the prototype already parses this metadata shape directly.
+When Journal metadata shows collaborators via `buddies` (read from `expandedentry.py`), the reflection question can become collaboration-aware. For example, instead of only asking what the learner did, the system can also ask what changed because the work was shared. The metadata already exists in Sugar today, and the prototype already parses it directly.
+
+### 5. OpenAI-compatible Backend Opt-in
+
+The service supports three inference paths: a local Ollama model, Sugar-AI deployed on a school server, and an optional OpenAI-compatible endpoint. The OpenAI-compatible path requires explicit configuration by whoever deploys the Sugar instance — typically the Sugar Labs maintainers or a school technical administrator setting up their own Sugar server. Students and children have no visibility into this choice. The default is always the local model.
 
 ---
 
@@ -268,20 +280,6 @@ At the time of this proposal revision, the prototype test suite passes:
 
 That does not mean the full Sugar Journal integration is already done, but it does mean the core reflection engine is no longer hypothetical.
 
-### Current Implementation Status
-
-| Area | Current status |
-|---|---|
-| reflection engine | implemented and tested |
-| adaptive depth tracking | implemented and tested |
-| seeded strategy selection | implemented and tested |
-| metadata-only prompt construction | implemented and tested |
-| collaborative reflection from `buddies` metadata | implemented and tested |
-| FastAPI endpoints | implemented and tested |
-| direct Sugar Journal metadata adapter | implemented and tested |
-| Sugar Journal UI integration in `jarabe` | grounded in current source, planned for project implementation |
-| Journal trigger wiring in `jarabe` | grounded in current source, planned for project implementation |
-
 ---
 
 ## Timeline
@@ -314,11 +312,9 @@ That does not mean the full Sugar Journal integration is already done, but it do
 - improve raw Journal metadata adaptation
 - verify collaboration-aware handling
 - document service contract for Sugar-side use
-- build a minimal Sugar-side integration spike that can display a mock reflection question in the Journal detail flow
 
 ### Week 4
 
-- connect the Sugar-side spike to the service using the stable API contract
 - test repeated-session depth progression thoroughly
 - test strategy overrides and malformed metadata cases
 - tune prompts against open-source instruct models
@@ -326,7 +322,7 @@ That does not mean the full Sugar Journal integration is already done, but it do
 
 ### Week 5
 
-- continue Journal detail view integration
+- begin Sugar Journal integration in the detail flow
 - connect Journal events to service calls
 - ensure metadata-only updates do not retrigger incorrectly
 - prepare first visible Journal integration demo
@@ -339,14 +335,14 @@ Before the first evaluation, I plan to complete:
 - the seeded activity strategy model,
 - adaptive depth persistence,
 - collaboration-aware prompting,
-- a visible Journal-side integration path using either a mock or live local service call.
+- first visible Journal-side integration work.
 
 ### Week 6
 
-- complete reflection panel UI
+- continue Journal detail view integration
+- add reflection panel UI
 - improve loading and refresh behavior in the Journal
 - fix integration issues found during mentor review
-- stabilize the end-to-end flow from Journal event to rendered question
 
 ### Week 7
 
@@ -378,7 +374,7 @@ Before the first evaluation, I plan to complete:
 
 Before the second evaluation, I plan to complete:
 
-- a working Journal reflection loop triggered from the save or revisit flow,
+- a working Journal reflection loop,
 - adaptive depth persistence,
 - collaboration-aware reflection,
 - safe bounded prompting and fallback behavior,
@@ -410,9 +406,9 @@ Before the second evaluation, I plan to complete:
 |---|---|---|
 | Community Bonding | reflection-framework notes, Journal integration notes, refined design | shared design summary |
 | M1 | robust FastAPI reflection service with tested schema, depth tracking, strategy selection, and validation | passing unit and integration tests |
-| M2 | raw Journal metadata adaptation plus a minimal Journal-side integration spike | service demo, endpoint tests, and Sugar-side walkthrough |
+| M2 | raw Journal metadata adaptation and collaboration-aware reflection path | service demo and endpoint tests |
 | M3 | Journal detail-view integration with visible reflection question flow | running Sugar demo or mentor walkthrough |
-| M4 | adaptive depth persistence, collaboration-aware prompting, and locale-aware fallback behavior in the integrated flow | repeated-session and shared-session demo |
+| M4 | adaptive depth persistence and refined safety behavior in integrated flow | repeated-session and shared-session demo |
 | M5 | final documentation, cleanup, and final report | final docs and final submission |
 
 ### Stretch goals
@@ -427,7 +423,7 @@ Before the second evaluation, I plan to complete:
 
 ## Hours Per Week
 
-I can dedicate **about 30 hours per week on average**, with some weeks reaching **35 hours** around integration or milestone work. This keeps the plan aligned with a 350-hour project while still leaving realistic room for debugging and buffer time.
+I can dedicate **30-35 hours per week** to this project during the coding period. This will be my primary technical commitment during the summer.
 
 ---
 
