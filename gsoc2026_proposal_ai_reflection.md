@@ -41,6 +41,8 @@
 
 These contributions matter because this project sits directly at the intersection of the Sugar Journal and reflection-related AI work.
 
+I am a third-year Computer Science student at Amrita Vishwa Vidyapeetham, India. I have been contributing to open source since 2024 across testing, security, and backend work. I fixed the XSS vulnerability in the Sugar Reflection Widget because I was reading the code out of curiosity, not as part of any assignment. That is the level of engagement I bring to Sugar Labs work.
+
 ---
 
 ## What Am I Making?
@@ -114,6 +116,10 @@ To stay realistic within 350 hours, the open-source LLM plan is:
 - measure reliability for the constrained one-question reflection task,
 - use lightweight task adaptation only if prompt-only behavior is not good enough.
 
+### Reflective Practice Research
+
+The project idea explicitly asks for research into reflective practice, so I compared several candidate frameworks before narrowing the v1 design. The frameworks I looked at were Gibbs, Kolb, What / So What / Now What, KWL, and Socratic questioning. For Sugar Journal integration, the key constraint is that the model should produce one short reflection prompt at a time, not a multi-step questionnaire. Under that constraint, Socratic questioning, KWL, and What / So What / Now What are the strongest fit: they are lightweight, distinct from one another, and map naturally to procedural, knowledge-oriented, and expressive activities respectively.
+
 ### Sugar Journal Grounding
 
 The proposal is grounded in current Sugar source:
@@ -121,6 +127,7 @@ The proposal is grounded in current Sugar source:
 - `src/jarabe/journal/journalactivity.py` connects to `model.created` and `model.updated`,
 - `src/jarabe/journal/detailview.py` manages the detail view where a reflection panel fits,
 - `src/jarabe/journal/expandedentry.py` displays metadata and `buddies` collaborators,
+- `src/jarabe/journal/model.py` exposes `activity` and `buddies` metadata through the datastore query interface,
 - metadata-only writes use `update_mtime=False`, which matters for suppressing spurious reflection triggers.
 
 ---
