@@ -437,6 +437,12 @@ class TestFastAPIEndpoints:
         assert response.json()["status"] == "ok"
         assert response.json()["backend"] == "mock"
 
+    def test_ready_endpoint(self, client):
+        response = client.get("/ready")
+        assert response.status_code == 200
+        assert response.json()["status"] == "ready"
+        assert response.json()["backend"] == "mock"
+
     def test_reflect_endpoint(self, client):
         response = client.post(
             "/reflect",

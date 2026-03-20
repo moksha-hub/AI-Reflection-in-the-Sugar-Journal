@@ -320,6 +320,12 @@ class BaseLLMBackend:
     async def generate(self, system_prompt: str, user_prompt: str) -> str:
         raise NotImplementedError
 
+    async def health_check(self) -> bool:
+        return False
+
+    async def health_check(self) -> bool:
+        return True
+
 
 class MockBackend(BaseLLMBackend):
     """Returns the static fallback question - useful for tests and demos."""
@@ -328,6 +334,12 @@ class MockBackend(BaseLLMBackend):
         if "similar in depth to:" in user_prompt:
             return user_prompt.split("similar in depth to:", 1)[1].split("\n", 1)[0].strip()
         return "What did you learn from this activity?"
+
+    async def health_check(self) -> bool:
+        return True
+
+    async def health_check(self) -> bool:
+        return True
 
 
 class OllamaBackend(BaseLLMBackend):
@@ -358,6 +370,24 @@ class OllamaBackend(BaseLLMBackend):
             )
             response.raise_for_status()
             return response.json()["message"]["content"]
+
+    async def health_check(self) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                response = await client.get(f"{self.url}/api/tags")
+                response.raise_for_status()
+            return True
+        except Exception:
+            return False
+
+    async def health_check(self) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                response = await client.get(f"{self.url}/api/tags")
+                response.raise_for_status()
+            return True
+        except Exception:
+            return False
 
 
 class SugarAIBackend(BaseLLMBackend):
@@ -421,6 +451,30 @@ class SugarAIBackend(BaseLLMBackend):
             response.raise_for_status()
             return self._extract_text(response.json())
 
+    async def health_check(self) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                response = await client.get(
+                    f"{self.url}/health",
+                    headers=self._headers(),
+                )
+                response.raise_for_status()
+            return True
+        except Exception:
+            return False
+
+    async def health_check(self) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                response = await client.get(
+                    f"{self.url}/health",
+                    headers=self._headers(),
+                )
+                response.raise_for_status()
+            return True
+        except Exception:
+            return False
+
 
 class OpenAIBackend(BaseLLMBackend):
     """Cloud LLM - compatibility path only, not the core deployment target."""
@@ -452,6 +506,12 @@ class OpenAIBackend(BaseLLMBackend):
             )
             response.raise_for_status()
             return response.json()["choices"][0]["message"]["content"]
+
+    async def health_check(self) -> bool:
+        return bool(self.api_key)
+
+    async def health_check(self) -> bool:
+        return bool(self.api_key)
 
 
 class LLMClient:
@@ -493,6 +553,12 @@ class LLMClient:
         except Exception as exc:
             LOGGER.warning("LLM generation failed; using fallback question: %s", exc)
         return fallback_question
+
+    async def backend_ready(self) -> bool:
+        try:
+            return await self.backend.health_check()
+        except Exception:
+            return False
 
 
 class ReflectionEngine:
@@ -583,6 +649,9 @@ class ReflectionEngine:
         request = self.metadata_adapter.to_reflect_request(metadata_request)
         return await self.reflect(request)
 
+    async def is_ready(self) -> bool:
+        return await self.llm_client.backend.health_check()
+
 
 def create_app(config_override: Optional[ReflectionConfig] = None) -> FastAPI:
     config = config_override or ReflectionConfig()
@@ -604,6 +673,39 @@ def create_app(config_override: Optional[ReflectionConfig] = None) -> FastAPI:
     @app.get("/health")
     async def health():
         return {"status": "ok", "backend": config.llm_backend.value}
+
+    @app.get("/ready")
+    async def ready(request: Request):
+        engine = getattr(request.app.state, "engine", None)
+        if engine is None:
+            raise HTTPException(status_code=503, detail="Engine not initialised")
+
+        if not await engine.is_ready():
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "status": "not_ready",
+                    "backend": config.llm_backend.value,
+                },
+            )
+        return {"status": "ready", "backend": config.llm_backend.value}
+
+    @app.get("/ready")
+    async def ready(request: Request):
+        engine = getattr(request.app.state, "engine", None)
+        if engine is None:
+            raise HTTPException(status_code=503, detail="Engine not initialised")
+
+        is_ready = await engine.llm_client.backend_ready()
+        if not is_ready:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "status": "degraded",
+                    "backend": config.llm_backend.value,
+                },
+            )
+        return {"status": "ready", "backend": config.llm_backend.value}
 
     @app.post("/reflect", response_model=ReflectResponse)
     async def reflect(payload: ReflectRequest, request: Request):

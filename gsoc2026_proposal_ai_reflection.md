@@ -94,7 +94,7 @@ This project is realistic because it builds on things that already exist:
 - Journal signals in `journalactivity.py`,
 - existing reflection work in Music Blocks,
 - Sugar-AI and FastAPI-based infrastructure,
-- a working prototype with 51 passing tests.
+- a working prototype with 59 passing tests.
 
 ---
 
@@ -234,6 +234,7 @@ Sugar Journal create / update flow
 | `POST /reflect` | generate a reflection from a structured request |
 | `POST /reflect-from-journal` | accept raw Journal metadata and adapt internally |
 | `GET /health` | service health plus active backend |
+| `GET /ready` | readiness check for the currently configured backend |
 | `GET /strategies` | list active activity-to-strategy mapping |
 | `GET /depth/{profile_id}` | return profile depth state across activities |
 
@@ -265,7 +266,13 @@ The working prototype lives at: [github.com/moksha-hub/AI-Reflection-in-the-Suga
 | `reflection_service.py` | full FastAPI service: strategy selection, adaptive depth, backend abstraction, Journal metadata adaptation, validation, collaboration-aware prompting |
 | `prompts.py` | curated static fallback library and peer-awareness prompts across locales |
 | `config.py` | service configuration, backend selection, strategy overrides |
+| `evaluation/metrics.py` | lightweight scoring for bounded prompt quality, collaboration handling, and structural safety |
+| `evaluation/evaluate_service.py` | a small evaluation harness for representative reflection requests across strategies and locales |
+| `docs/frameworks.md` | reflective-practice research rationale behind the seeded v1 framework set |
+| `docs/deployment.md` | realistic deployment notes for mock, local Ollama, and Sugar-AI paths |
+| `docs/journal-integration.md` | intended Journal trigger and metadata flow for `jarabe` integration |
 | `test_reflection_service.py` | automated evidence that the service behaviour is stable |
+| `test_evaluation.py` | automated checks for evaluation metrics and the prototype evaluation harness |
 | `README.md` | architecture and developer setup |
 
 ### What the prototype already demonstrates
@@ -277,7 +284,9 @@ The working prototype lives at: [github.com/moksha-hub/AI-Reflection-in-the-Suga
 - local profile depth history instead of a classroom abstraction,
 - deployment-specific strategy overrides,
 - metadata-only prompt construction,
-- structural output validation with safe fallback.
+- structural output validation with safe fallback,
+- backend readiness checks for integration and deployment demos,
+- a lightweight evaluation harness for bounded prompt behaviour.
 
 ### Current implementation status
 
@@ -289,11 +298,13 @@ The working prototype lives at: [github.com/moksha-hub/AI-Reflection-in-the-Suga
 | metadata-only prompt construction | implemented and tested |
 | collaborative reflection from `buddies` metadata | implemented and tested |
 | FastAPI endpoints | implemented and tested |
+| lightweight evaluation harness | implemented and tested |
+| deployment and integration notes | implemented |
 | Sugar Journal metadata adapter | implemented and tested |
 | Sugar Journal UI integration in `jarabe` | grounded in current source, planned for project implementation |
 | Journal trigger wiring in `jarabe` | grounded in current source, planned for project implementation |
 
-At the time of submission: **51 tests passing.**
+At the time of submission: **59 tests passing.**
 
 This does not mean the full Sugar Journal integration is already done. It means the core reflection engine is already real, testable, and ready to be integrated.
 

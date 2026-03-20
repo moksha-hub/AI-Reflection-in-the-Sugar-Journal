@@ -151,6 +151,11 @@ Example:
 
 Returns service status and the active backend.
 
+### `GET /ready`
+
+Returns `ready` when the configured backend passes a lightweight health check.
+This is useful when integrating the service into Sugar-side startup or demo scripts.
+
 ### `GET /strategies`
 
 Returns the effective strategy map, including deployment overrides.
@@ -167,6 +172,7 @@ cd AI-Reflection-in-the-Sugar-Journal
 pip install -r requirements.txt
 python reflection_service.py
 pytest -q
+python -m evaluation.evaluate_service
 uvicorn reflection_service:app --port 8765
 ```
 
@@ -187,7 +193,7 @@ Key options in `config.py`:
 
 ## Test status
 
-The test suite currently has `51` passing tests.
+The test suite currently has `59` passing tests.
 
 It covers:
 - depth tracking, persistence, reset, and corrupted-store recovery
@@ -202,25 +208,42 @@ Run:
 
 ```bash
 pytest -q
+python -m evaluation.evaluate_service
 ```
 
 Expected output:
 
 ```text
-51 passed
+59 passed
 ```
 
 ## Repository layout
 
 ```text
 AI-Reflection-in-the-Sugar-Journal/
+|- docs/
+|  |- deployment.md
+|  |- frameworks.md
+|  `- journal-integration.md
+|- evaluation/
+|  |- evaluate_service.py
+|  `- metrics.py
 |- reflection_service.py
 |- config.py
 |- prompts.py
 |- test_reflection_service.py
+|- test_evaluation.py
+|- pyproject.toml
 |- requirements.txt
 `- README.md
 ```
+
+## Additional evidence
+
+- [`docs/frameworks.md`](docs/frameworks.md) records the reflective-practice research rationale behind the seeded v1 strategy set.
+- [`docs/deployment.md`](docs/deployment.md) explains the local-first deployment story and hardware tradeoffs.
+- [`docs/journal-integration.md`](docs/journal-integration.md) documents the intended Sugar Journal trigger and metadata flow.
+- [`evaluation/evaluate_service.py`](evaluation/evaluate_service.py) provides a small prototype-oriented evaluation harness for bounded prompting behavior.
 
 ## Why this is a stronger proposal prototype
 
