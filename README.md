@@ -2,7 +2,7 @@
 
 Adaptive AI reflection service for the Sugar Journal.
 
-This repository is a working prototype for the Sugar Labs GSoC 2026 idea "AI Reflection in the Sugar Journal". The goal is not to generate content for the learner, but to prompt reflective practice when a Journal entry is saved or revisited.
+This repository is a working prototype for the Sugar Labs idea "AI Reflection in the Sugar Journal". The goal is not to generate content for the learner, but to prompt reflective practice when a Journal entry is saved or revisited.
 
 The prototype is now structured to be adaptable to Sugar itself:
 - it accepts raw Sugar Journal metadata through a dedicated endpoint
