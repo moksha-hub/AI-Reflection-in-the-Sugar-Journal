@@ -47,7 +47,10 @@ SCENARIOS = [
 ]
 
 
-async def run_evaluation(config: ReflectionConfig) -> tuple[list[dict], dict[str, float]]:
+async def run_evaluation(config: ReflectionConfig | None = None) -> dict[str, object]:
+    if config is None:
+        config = ReflectionConfig(llm_backend=LLMBackend.MOCK)
+
     engine = ReflectionEngine(config)
     results: list[dict] = []
 
@@ -80,7 +83,7 @@ async def run_evaluation(config: ReflectionConfig) -> tuple[list[dict], dict[str
             }
         )
 
-    return results, summarize_results(results)
+    return {"responses": results, "summary": summarize_results(results)}
 
 
 def main() -> None:
@@ -99,16 +102,16 @@ def main() -> None:
     args = parser.parse_args()
 
     config = ReflectionConfig(llm_backend=LLMBackend(args.backend))
-    results, summary = asyncio.run(run_evaluation(config))
+    report = asyncio.run(run_evaluation(config))
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(
-        json.dumps({"summary": summary, "results": results}, indent=2),
+        json.dumps(report, indent=2),
         encoding="utf-8",
     )
 
-    print(json.dumps(summary, indent=2))
+    print(json.dumps(report["summary"], indent=2))
     print(f"Saved full report to {output_path}")
 
 

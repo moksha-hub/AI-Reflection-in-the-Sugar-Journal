@@ -193,7 +193,7 @@ Key options in `config.py`:
 
 ## Test status
 
-The test suite currently has `59` passing tests.
+The test suite currently has `52` passing tests.
 
 It covers:
 - depth tracking, persistence, reset, and corrupted-store recovery
@@ -214,7 +214,7 @@ python -m evaluation.evaluate_service
 Expected output:
 
 ```text
-59 passed
+52 passed
 ```
 
 ## Repository layout

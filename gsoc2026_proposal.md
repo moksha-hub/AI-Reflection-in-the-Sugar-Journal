@@ -94,7 +94,7 @@ This project is realistic because it builds on things that already exist:
 - Journal signals in `journalactivity.py`,
 - existing reflection work in Music Blocks,
 - Sugar-AI and FastAPI-based infrastructure,
-- a working prototype with 59 passing tests.
+- a working prototype with 52 passing tests.
 
 ---
 
@@ -304,7 +304,7 @@ The working prototype lives at: [github.com/moksha-hub/AI-Reflection-in-the-Suga
 | Sugar Journal UI integration in `jarabe` | grounded in current source, planned for project implementation |
 | Journal trigger wiring in `jarabe` | grounded in current source, planned for project implementation |
 
-At the time of submission: **59 tests passing.**
+At the time of submission: **52 tests passing.**
 
 This does not mean the full Sugar Journal integration is already done. It means the core reflection engine is already real, testable, and ready to be integrated.
 

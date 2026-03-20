@@ -8,3 +8,6 @@ build/
 .env
 demo_output.txt
 depth_progression_demo.json
+evaluation/report.json
+evaluation/report.json
+gsoc2026_proposal_ai_reflection.pdf
